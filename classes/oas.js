@@ -49,7 +49,7 @@ module.exports = class Oas {
     const contactObject = this._getContactObject()
 
     infoObject.title = api.config.general.serverName || packageJson.name
-    infoObject.description = packageJson.description
+    packageJson.description && (infoObject.description = packageJson.description)
     contactObject && (infoObject.contact = contactObject)
     packageJson.license && (infoObject.license = { name: packageJson.license })
     infoObject.version = api.config.general.apiVersion || packageJson.version
@@ -73,13 +73,21 @@ module.exports = class Oas {
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#serverObject
   _getServerObjects () {
     const servers = api.config.oas.servers
-
-    if (!servers ||
+    const hasInvalidServersFromConfigFile = !servers ||
       !_.isArray(servers) ||
       servers.length === 0 ||
-      _.every(servers, (s) => !s.url || typeof s.url !== 'string')
-    ) {
-      return null
+      _.some(servers, (s) => !s.url || typeof s.url !== 'string')
+
+    if (hasInvalidServersFromConfigFile) {
+      const scheme = api.config.servers.web.secure ? 'https' : 'http'
+      const serverIp = api.utils.getExternalIPAddress()
+      const serverPort = api.config.servers.web.port
+      const baseUrl = api.config.oas.baseUrl || (serverIp + serverPort)
+      const basePath = api.config.servers.web.urlPathForActions || 'api'
+
+      return [{
+        url: `${scheme}://${baseUrl}/${basePath}`
+      }]
     }
 
     return servers
@@ -129,7 +137,8 @@ module.exports = class Oas {
 
     pathItemObject[route] = {}
 
-    for (let verb in verbs) {
+    for (let i in verbs) {
+      const verb = verbs[i]
       const operationObject = this._getOperationObject(action, tags)
       const parameterObjects = this._getParameterObjects(action, route)
 
@@ -150,6 +159,8 @@ module.exports = class Oas {
     operationObject.operationId = action.name // FIXME: This is supposed to be unique.
     operationObject.responses = this._getResponsesObject(action)
     // operationObject.security = [{}]
+
+    return operationObject
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#responsesObject
@@ -195,7 +206,7 @@ module.exports = class Oas {
     parameterObject.in = this._getParamType(input, action.in, route)
     input.description && (parameterObject.description = input.description)
     input.required && (parameterObject.required = input.required)
-    input.schema && (parameterObject.schema = input.schema)
+    parameterObject.schema = input.schema || { type: 'string' }
     style && (parameterObject.style = style)
 
     return parameterObject
