@@ -1,11 +1,36 @@
 {
+  "author": "Walberto Ibarra <walberto.ibarra92@gmail.com>",
   "name": "ah-oas-plugin",
-  "version": "0.1.0",
   "description": "Generate OpenApi Specification documentation for ActionHero",
-  "main": "index.js",
+  "version": "0.1.0",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Walberto Ibarra <walberto.ibarra92@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/walbertoibarra/ah-oas-plugin"
+  },
+  "bug": "https://github.com/walbertoibarra/ah-oas-plugin/issues",
+  "keywords": [
+    "oas",
+    "openapi",
+    "swagger",
+    "actionhero",
+    "ah",
+    "plugin"
+  ],
+  "engines": {
+    "node": ">=8.0.0"
+  },
+  "dependencies": {
+    "lodash": "^4.17.10",
+    "parse-author": "^2.0.0"
+  },
+  "peerDependencies": {
+    "actionhero": ">=18.0.0"
+  },
+  "devDependencies": {
+    "standard": "^11.0.1"
+  }
 }
