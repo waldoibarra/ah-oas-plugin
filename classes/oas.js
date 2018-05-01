@@ -35,9 +35,11 @@ module.exports = class Oas {
     this._openApiDocument.security = this._getSecurityRequirementObjects()
     this._openApiDocument.paths = this._getPathsObject()
 
-    // TODO: Add logic for these.
-    // this._openApiDocument.tags = [{}]
-    // this._openApiDocument.externalDocs = {}
+    const tagObjects = this._getTagObjects()
+    tagObjects && (this._openApiDocument.tags = tagObjects)
+
+    // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#externalDocumentationObject
+    api.config.oas.apiDocumentation && (this._openApiDocument.externalDocs = api.config.oas.apiDocumentation)
 
     // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#componentsObject
     this._componentsObject && (this._openApiDocument.components = this._componentsObject)
@@ -72,7 +74,7 @@ module.exports = class Oas {
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#serverObject
   _getServerObjects () {
-    const serverObjects = api.config.oas.serverObjects
+    const serverObjects = api.config.oas.servers
     const hasInvalidServersFromConfigFile = !serverObjects ||
       !_.isArray(serverObjects) ||
       serverObjects.length === 0 ||
@@ -80,9 +82,9 @@ module.exports = class Oas {
 
     if (hasInvalidServersFromConfigFile) {
       const scheme = api.config.servers.web.secure ? 'https' : 'http'
-      const serverIp = api.utils.getExternalIPAddress()
-      const serverPort = api.config.servers.web.port
-      const baseUrl = api.config.oas.baseUrl || (serverIp + serverPort)
+      const serverIp = api.config.oas.hostOverride || api.utils.getExternalIPAddress()
+      const serverPort = api.config.oas.portOverride || api.config.servers.web.port
+      const baseUrl = api.config.oas.baseUrl || (serverIp + ':' + serverPort)
       const basePath = api.config.servers.web.urlPathForActions || 'api'
 
       return [{
@@ -176,8 +178,20 @@ module.exports = class Oas {
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#operationObject
   _getOperationObject (action, verb, route) {
     const operationObject = {}
+    const tags = []
 
-    // TODO: Add tags.
+    if (api.config.oas.groupByVersionTag) {
+      tags.push(action.version.toString())
+    }
+
+    if (_.isArray(action.tags) && action.tags.lenght > 0) {
+      tags.push(...action.tags)
+    }
+
+    if (tags.length > 0) {
+      operationObject.tags = tags
+    }
+
     operationObject.operationId = uuid.v4()
     operationObject.responses = this._getResponsesObject(action)
 
@@ -330,7 +344,8 @@ module.exports = class Oas {
         return null
       }
 
-      schemaObject[inputName] = input
+      // Deep copy as we mutate the object and also delete unwanted functions.
+      schemaObject[inputName] = JSON.parse(JSON.stringify(input))
 
       if (!input.type) {
         schemaObject[inputName].type = 'string'
@@ -349,18 +364,6 @@ module.exports = class Oas {
         }
 
         delete schemaObject[inputName].schema
-      }
-
-      if (input.default && typeof input.default === 'function') {
-        delete schemaObject[inputName].default
-      }
-
-      if (input.validator) {
-        delete schemaObject[inputName].validator
-      }
-
-      if (input.formatter) {
-        delete schemaObject[inputName].formatter
       }
     }
 
@@ -387,7 +390,7 @@ module.exports = class Oas {
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#securityRequirementObject
   _getSecurityRequirementObjects () {
-    const securityRequirementObjects = api.config.oas.securityRequirementObjects
+    const securityRequirementObjects = api.config.oas.security
     const hasInvalidSecurityRequirementsFromConfigFile = true // TODO: Add validations for this.
 
     if (hasInvalidSecurityRequirementsFromConfigFile) {
@@ -404,5 +407,60 @@ module.exports = class Oas {
     }
 
     return securityRequirementObjects
+  }
+
+  _getTagObjects () {
+    const tagObjects = []
+    const tagsInfo = Object.assign({}, api.config.oas.tagsInfo)
+
+    if (api.config.oas.groupByVersionTag) {
+      // Get all versions available on the API.
+      let versions = []
+      const actions = api.actions.actions
+
+      for (let actionName in actions) {
+        for (let version in actions[actionName]) {
+          versions.push(version)
+        }
+      }
+
+      const uniqueVersions = _.uniq(versions)
+
+      for (let i in uniqueVersions) {
+        const version = uniqueVersions[i].toString()
+        const description = _.get(tagsInfo, `${version}.description`)
+        const externalDocs = _.get(tagsInfo, `${version}.externalDocs`)
+        const tagObject = this._getTagObject(version, description, externalDocs)
+
+        delete tagsInfo[version]
+
+        tagObjects.push(tagObject)
+      }
+    }
+
+    for (let tagName in tagsInfo) {
+      const description = _.get(tagsInfo, `${tagName}.description`)
+      const externalDocs = _.get(tagsInfo, `${tagName}.externalDocs`)
+      const tagObject = this._getTagObject(tagName, description, externalDocs)
+
+      tagObjects.push(tagObject)
+    }
+
+    if (tagObjects.length === 0) {
+      return null
+    } else {
+      return tagObjects
+    }
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#tagObject
+  _getTagObject (name, description = null, externalDocumentationObject = null) {
+    const tagObject = {}
+
+    tagObject.name = name.toString()
+    description && (tagObject.description = description)
+    externalDocumentationObject && (tagObject.externalDocs = externalDocumentationObject)
+
+    return tagObject
   }
 }
