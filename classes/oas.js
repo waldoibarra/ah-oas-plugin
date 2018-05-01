@@ -5,42 +5,42 @@ const path = require('path')
 const _ = require('lodash')
 const { api } = require('actionhero')
 const parseAuthor = require('parse-author')
+const uuid = require('uuid')
 
 const packageJson = require(api.projectRoot + path.sep + 'package.json')
 
 module.exports = class Oas {
   constructor () {
-    this._documentation = {}
-    this._components = null
+    this._openApiDocument = {}
+    this._componentsObject = null
   }
 
-  getDocumentation () {
-    return this._documentation
+  getOpenApiDocument () {
+    return this._openApiDocument
   }
 
   // https://swagger.io/specification/
-  buildDocumentation () {
+  buildOpenApiDocument () {
     // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#oasObject
-    const documentationObject = {}
+    this._openApiDocument = {}
 
-    this._components = null
+    this._componentsObject = {}
 
-    documentationObject.openapi = '3.0.1'
-    documentationObject.info = this._getInfoObject()
+    this._openApiDocument.openapi = '3.0.1'
+    this._openApiDocument.info = this._getInfoObject()
 
     const serverObjects = this._getServerObjects()
-    serverObjects && (documentationObject.servers = serverObjects)
+    serverObjects && (this._openApiDocument.servers = serverObjects)
 
-    documentationObject.paths = this._getPathsObject()
+    this._openApiDocument.security = this._getSecurityRequirementObjects()
+    this._openApiDocument.paths = this._getPathsObject()
 
     // TODO: Add logic for these.
-    // documentationObject.security = [{}]
-    // documentationObject.tags = [{}]
-    // documentationObject.externalDocs = {}
+    // this._openApiDocument.tags = [{}]
+    // this._openApiDocument.externalDocs = {}
 
-    this._components && (documentationObject.components = this._components)
-
-    this._documentation = documentationObject
+    // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#componentsObject
+    this._componentsObject && (this._openApiDocument.components = this._componentsObject)
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#infoObject
@@ -72,11 +72,11 @@ module.exports = class Oas {
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#serverObject
   _getServerObjects () {
-    const servers = api.config.oas.servers
-    const hasInvalidServersFromConfigFile = !servers ||
-      !_.isArray(servers) ||
-      servers.length === 0 ||
-      _.some(servers, (s) => !s.url || typeof s.url !== 'string')
+    const serverObjects = api.config.oas.serverObjects
+    const hasInvalidServersFromConfigFile = !serverObjects ||
+      !_.isArray(serverObjects) ||
+      serverObjects.length === 0 ||
+      _.some(serverObjects, (s) => !s.url || typeof s.url !== 'string')
 
     if (hasInvalidServersFromConfigFile) {
       const scheme = api.config.servers.web.secure ? 'https' : 'http'
@@ -90,7 +90,7 @@ module.exports = class Oas {
       }]
     }
 
-    return servers
+    return serverObjects
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#pathsObject
@@ -99,15 +99,40 @@ module.exports = class Oas {
     const actions = api.actions.actions
     const verbs = api.routes.verbs
 
-    for (let actionName in actions) {
-      for (let version in actions[actionName]) {
-        const action = actions[actionName][version]
-        const route = '/' + action.name
+    if (api.config.servers.web.simpleRouting) {
+      for (let actionName in actions) {
+        for (let version in actions[actionName]) {
+          const action = actions[actionName][version]
+          const route = '/' + action.name
 
-        const pathItemObject = this._getPathItemObject(route, action, verbs)
+          const pathItemObject = this._getPathItemObject(route, action, verbs)
 
-        pathsObject = { ...pathsObject, ...pathItemObject }
+          pathsObject = { ...pathsObject, ...pathItemObject }
+        }
       }
+    }
+
+    if (api.config.servers.web.queryRouting) {
+      // '?action=:' + action.name
+      const action = {
+        name: 'actionHeroOasGenericActionForQueryRouting',
+        version: 1,
+        'in': 'query',
+        inputs: {
+          action: {
+            type: 'string',
+            required: true
+          },
+          apiVersion: {
+            type: 'string',
+            required: false
+          }
+        }
+      }
+      const route = '/'
+      const pathItemObject = this._getPathItemObject(route, action, verbs)
+
+      pathsObject = { ...pathsObject, ...pathItemObject }
     }
 
     for (let verb in api.config.routes) {
@@ -133,32 +158,43 @@ module.exports = class Oas {
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#pathItemObject
   _getPathItemObject (route, action, verbs) {
     const pathItemObject = {}
-    const tags = null // TODO: Construct tags array.
 
     pathItemObject[route] = {}
 
     for (let i in verbs) {
       const verb = verbs[i]
-      const operationObject = this._getOperationObject(action, tags)
-      const parameterObjects = this._getParameterObjects(action, route)
+      const operationObject = this._getOperationObject(action, verb, route)
 
       action.summary && (pathItemObject[route].summary = action.summary)
       action.description && (pathItemObject[route].description = action.description)
       pathItemObject[route][verb] = operationObject
-      parameterObjects && (pathItemObject[route].parameters = parameterObjects)
     }
 
     return pathItemObject
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#operationObject
-  _getOperationObject (action, tags) {
+  _getOperationObject (action, verb, route) {
     const operationObject = {}
 
-    tags && _.isArray(tags) && tags.length > 0 && (operationObject.tags = tags)
-    operationObject.operationId = action.name // FIXME: This is supposed to be unique.
+    // TODO: Add tags.
+    operationObject.operationId = uuid.v4()
     operationObject.responses = this._getResponsesObject(action)
-    // operationObject.security = [{}]
+
+    // FIXME: Not all inputs may be in the request body.
+    if (verb === 'post' || verb === 'put') {
+      const requestBodyObject = this._getRequestBodyObject(action, route)
+
+      requestBodyObject && (operationObject.requestBody = requestBodyObject)
+    } else {
+      const parameterObjects = this._getParameterObjects(action, route)
+
+      parameterObjects && (operationObject.parameters = parameterObjects)
+    }
+
+    // FIXME: Remove this from here, read this from the action itself.
+    // Consider using _getSecurityRequirementObjects and send it the action?
+    operationObject.security = this._openApiDocument.security
 
     return operationObject
   }
@@ -177,6 +213,49 @@ module.exports = class Oas {
     return action.responseSchemas || defaultSchemas
   }
 
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#requestBodyObject
+  _getRequestBodyObject (action, route) {
+    const requestBodyObject = {}
+    const componentName = `${action.name}_${action.version}`
+    let referenceObject = this._getReferenceObject('requestBodies', componentName)
+
+    if (referenceObject) {
+      return referenceObject
+    }
+
+    requestBodyObject.content = this._getMediaTypeObjects(action, route)
+
+    referenceObject = this._getReferenceObject('requestBodies', componentName, requestBodyObject)
+
+    return referenceObject
+  }
+
+  _getMediaTypeObjects (action, route) {
+    const mediaTypeObjects = []
+    const mediaTypes = ['application/json'] // TODO: Read from somewhere else?
+    const mediaTypeObject = this._getMediaTypeObject(action, route)
+
+    for (let i in mediaTypes) {
+      const mediaType = mediaTypes[i]
+
+      mediaTypeObjects.push({
+        [mediaType]: mediaTypeObject
+      })
+    }
+
+    return mediaTypeObjects
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#mediaTypeObject
+  _getMediaTypeObject (action, route) {
+    const mediaTypeObject = {}
+    const schemaObject = this._getSchemaObject(action.inputs, route)
+
+    schemaObject && (mediaTypeObject.schema = schemaObject)
+
+    return mediaTypeObject
+  }
+
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterObject
   _getParameterObjects (action, route) {
     if (!action.inputs) {
@@ -188,9 +267,8 @@ module.exports = class Oas {
     for (let name in action.inputs) {
       const input = action.inputs[name]
       const parameterObject = this._getParameterObject(action, input, name, route)
-      const referenceObject = this._getReferenceObject('parameter', action, parameterObject, name)
 
-      parameterObjects.push(referenceObject)
+      parameterObjects.push(parameterObject)
     }
 
     return parameterObjects
@@ -200,43 +278,131 @@ module.exports = class Oas {
   _getParameterObject (action, input, name, route) {
     const parameterObject = {}
     const style = input.style || action.style
+    const componentName = `${action.name}_${action.version}_${name}`
+    let referenceObject = this._getReferenceObject('parameter', componentName)
 
-    // TODO: Add body (POST/PUT) params to Request Body Object on Components Object.
-    parameterObject.name = name
-    parameterObject.in = this._getParamType(input, action.in, route)
-    input.description && (parameterObject.description = input.description)
-    input.required && (parameterObject.required = input.required)
-    parameterObject.schema = input.schema || { type: 'string' }
-    style && (parameterObject.style = style)
-
-    return parameterObject
-  }
-
-  _getParamType (input, location, route) {
-    const paramType = input.paramType || location
-
-    if (paramType) {
-      return paramType
+    if (referenceObject) {
+      return referenceObject
     }
 
-    // TODO: Check on route to get parameter type if not specified.
-    return 'path' // 'path' or 'query'?
+    parameterObject.name = name
+    parameterObject.in = this._getParameterIn(input, action.in, route)
+    input.description && (parameterObject.description = input.description)
+
+    if (typeof input.required !== 'undefined') {
+      parameterObject.required = input.required
+    }
+
+    parameterObject.schema = this._getSchemaObject({ [name]: input })[name]
+    style && (parameterObject.style = style)
+
+    referenceObject = this._getReferenceObject('parameter', componentName, parameterObject)
+
+    return referenceObject
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterIn
+  _getParameterIn (input, location, route) {
+    // Possible values are "query", "header", "path" or "cookie".
+    const parameterIn = input.in || location
+
+    if (parameterIn) {
+      return parameterIn
+    }
+
+    // FIXME: Check on route to get parameter type if not specified.
+    return 'path'
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#schemaObject
+  _getSchemaObject (inputs, route) {
+    if (!inputs || typeof inputs !== 'object') {
+      return null
+    }
+
+    const schemaObject = {}
+
+    for (let inputName in inputs) {
+      const input = inputs[inputName]
+
+      // Invalid input object.
+      if (typeof input !== 'object') {
+        return null
+      }
+
+      schemaObject[inputName] = input
+
+      if (!input.type) {
+        schemaObject[inputName].type = 'string'
+      }
+
+      if (typeof input.required === 'undefined') {
+        schemaObject[inputName].required = input.required
+      }
+
+      if (input.schema) {
+        const inputSchema = this._getSchemaObject(input.schema, route)
+
+        if (inputSchema) {
+          const propertyName = input.type === 'array' ? 'items' : 'properties'
+          schemaObject[inputName][propertyName] = inputSchema
+        }
+
+        delete schemaObject[inputName].schema
+      }
+
+      if (input.default && typeof input.default === 'function') {
+        delete schemaObject[inputName].default
+      }
+
+      if (input.validator) {
+        delete schemaObject[inputName].validator
+      }
+
+      if (input.formatter) {
+        delete schemaObject[inputName].formatter
+      }
+    }
+
+    return schemaObject
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#referenceObject
-  _getReferenceObject (aspect, action, component, name) {
-    const componentName = `${action.name}_${action.version}_${name}`
+  _getReferenceObject (aspect, componentName, component = null) {
     const searchPath = `${aspect}.${componentName}`
-    const exists = _.get(this._components, searchPath)
+    const exists = _.has(this._componentsObject, searchPath)
+
+    if (!exists && !component) {
+      return null
+    }
 
     if (!exists) {
-      this._components || (this._components = {})
-      this._components[aspect] || (this._components[aspect] = {})
-      this._components[aspect][componentName] = component
+      _.set(this._componentsObject, searchPath, component)
     }
 
     return {
       '$ref': `#/components/${aspect}/${componentName}`
     }
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#securityRequirementObject
+  _getSecurityRequirementObjects () {
+    const securityRequirementObjects = api.config.oas.securityRequirementObjects
+    const hasInvalidSecurityRequirementsFromConfigFile = true // TODO: Add validations for this.
+
+    if (hasInvalidSecurityRequirementsFromConfigFile) {
+      // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#security-scheme-object
+      return [{
+        type: 'apiKey',
+        name: 'Authorization',
+        'in': 'header'
+      }, {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT'
+      }]
+    }
+
+    return securityRequirementObjects
   }
 }
