@@ -5,7 +5,6 @@ const path = require('path')
 const _ = require('lodash')
 const { api } = require('actionhero')
 const parseAuthor = require('parse-author')
-const uuid = require('uuid')
 
 const packageJson = require(api.projectRoot + path.sep + 'package.json')
 
@@ -192,18 +191,18 @@ module.exports = class Oas {
       operationObject.tags = tags
     }
 
-    operationObject.operationId = uuid.v4()
+    operationObject.operationId = action.name + '_' + action.version.toString()
+
+    const { bodyParams, params } = this._divideParameters(action, verb, route)
+    const requestBodyObject = this._getRequestBodyObject(action, bodyParams)
+    const parameterObjects = this._getParameterObjects(action, params, route)
+
+    requestBodyObject && (operationObject.requestBody = requestBodyObject)
+    parameterObjects && (operationObject.parameters = parameterObjects)
     operationObject.responses = this._getResponsesObject(action)
 
-    // FIXME: Not all inputs may be in the request body.
-    if (verb === 'post' || verb === 'put') {
-      const requestBodyObject = this._getRequestBodyObject(action, route)
-
-      requestBodyObject && (operationObject.requestBody = requestBodyObject)
-    } else {
-      const parameterObjects = this._getParameterObjects(action, route)
-
-      parameterObjects && (operationObject.parameters = parameterObjects)
+    if (typeof action.deprecated !== 'undefined') {
+      operationObject.deprecated = action.deprecated
     }
 
     // FIXME: Remove this from here, read this from the action itself.
@@ -211,6 +210,29 @@ module.exports = class Oas {
     operationObject.security = this._openApiDocument.security
 
     return operationObject
+  }
+
+  _divideParameters (action, verb, route) {
+    const bodyParams = []
+    const params = []
+
+    for (let inputName in action.inputs) {
+      const input = action.inputs[inputName]
+
+      if (verb === 'post' || verb === 'put' || verb === 'patch') {
+        // Validate it is indeed a request body parameter.
+        const parameterIn = this._getParameterIn(input, action.in, route)
+
+        if (!parameterIn) {
+          bodyParams.push(inputName)
+          continue
+        }
+      }
+
+      params.push(inputName)
+    }
+
+    return { bodyParams, params }
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#responsesObject
@@ -228,7 +250,7 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#requestBodyObject
-  _getRequestBodyObject (action, route) {
+  _getRequestBodyObject (action, bodyParams) {
     const requestBodyObject = {}
     const componentName = `${action.name}_${action.version}`
     let referenceObject = this._getReferenceObject('requestBodies', componentName)
@@ -237,33 +259,32 @@ module.exports = class Oas {
       return referenceObject
     }
 
-    requestBodyObject.content = this._getMediaTypeObjects(action, route)
+    requestBodyObject.content = this._getMediaTypeObjects(action, bodyParams)
+    // TODO: When to mark as required?
 
     referenceObject = this._getReferenceObject('requestBodies', componentName, requestBodyObject)
 
     return referenceObject
   }
 
-  _getMediaTypeObjects (action, route) {
-    const mediaTypeObjects = []
+  _getMediaTypeObjects (action, bodyParams) {
+    const mediaTypeObjects = {}
     const mediaTypes = ['application/json'] // TODO: Read from somewhere else?
-    const mediaTypeObject = this._getMediaTypeObject(action, route)
+    const mediaTypeObject = this._getMediaTypeObject(action, bodyParams)
 
     for (let i in mediaTypes) {
       const mediaType = mediaTypes[i]
 
-      mediaTypeObjects.push({
-        [mediaType]: mediaTypeObject
-      })
+      mediaTypeObjects[mediaType] = mediaTypeObject
     }
 
     return mediaTypeObjects
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#mediaTypeObject
-  _getMediaTypeObject (action, route) {
+  _getMediaTypeObject (action, bodyParams) {
     const mediaTypeObject = {}
-    const schemaObject = this._getSchemaObject(action.inputs, route)
+    const schemaObject = this._getSchemaObject(action.inputs, bodyParams)
 
     schemaObject && (mediaTypeObject.schema = schemaObject)
 
@@ -271,7 +292,7 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterObject
-  _getParameterObjects (action, route) {
+  _getParameterObjects (action, params, route) {
     if (!action.inputs) {
       return null
     }
@@ -280,9 +301,12 @@ module.exports = class Oas {
 
     for (let name in action.inputs) {
       const input = action.inputs[name]
-      const parameterObject = this._getParameterObject(action, input, name, route)
 
-      parameterObjects.push(parameterObject)
+      if (params.includes(name)) {
+        const parameterObject = this._getParameterObject(action, input, name, route)
+
+        parameterObjects.push(parameterObject)
+      }
     }
 
     return parameterObjects
@@ -291,7 +315,6 @@ module.exports = class Oas {
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterObject
   _getParameterObject (action, input, name, route) {
     const parameterObject = {}
-    const style = input.style || action.style
     const componentName = `${action.name}_${action.version}_${name}`
     let referenceObject = this._getReferenceObject('parameter', componentName)
 
@@ -300,15 +323,26 @@ module.exports = class Oas {
     }
 
     parameterObject.name = name
-    parameterObject.in = this._getParameterIn(input, action.in, route)
+    parameterObject.in = this._getParameterIn(input, action.in, route) || 'query'
     input.description && (parameterObject.description = input.description)
 
     if (typeof input.required !== 'undefined') {
       parameterObject.required = input.required
     }
 
-    parameterObject.schema = this._getSchemaObject({ [name]: input })[name]
-    style && (parameterObject.style = style)
+    if (parameterObject.in === 'query' && typeof input.allowEmptyValue !== 'undefined') {
+      parameterObject.allowEmptyValue = input.allowEmptyValue
+    }
+
+    if (input.schema) {
+      const schemaObject = this._getSchemaObject(input.schema)
+
+      schemaObject && (parameterObject.schema = schemaObject)
+    }
+
+    input.style && (parameterObject.style = input.style)
+
+    // TODO: Add example objects.
 
     referenceObject = this._getReferenceObject('parameter', componentName, parameterObject)
 
@@ -316,20 +350,26 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterIn
-  _getParameterIn (input, location, route) {
+  _getParameterIn (input, actionIn, route) {
     // Possible values are "query", "header", "path" or "cookie".
-    const parameterIn = input.in || location
+    const parameterIn = input.in || actionIn
 
     if (parameterIn) {
       return parameterIn
     }
 
-    // FIXME: Check on route to get parameter type if not specified.
-    return 'path'
+    // Validate if parameter is part of the route.
+    const found = route.match(/\/:([\w]*)/g)
+
+    if (found) {
+      return 'path'
+    } else {
+      return null
+    }
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#schemaObject
-  _getSchemaObject (inputs, route) {
+  _getSchemaObject (inputs, whiteListedParams) {
     if (!inputs || typeof inputs !== 'object') {
       return null
     }
@@ -339,31 +379,15 @@ module.exports = class Oas {
     for (let inputName in inputs) {
       const input = inputs[inputName]
 
-      // Invalid input object.
-      if (typeof input !== 'object') {
-        return null
+      if (_.isArray(whiteListedParams) && !whiteListedParams.includes(inputName)) {
+        continue
       }
 
-      // Deep copy as we mutate the object and also delete unwanted functions.
+      // Delete functions from input object.
       schemaObject[inputName] = JSON.parse(JSON.stringify(input))
 
       if (!input.type) {
         schemaObject[inputName].type = 'string'
-      }
-
-      if (typeof input.required === 'undefined') {
-        schemaObject[inputName].required = input.required
-      }
-
-      if (input.schema) {
-        const inputSchema = this._getSchemaObject(input.schema, route)
-
-        if (inputSchema) {
-          const propertyName = input.type === 'array' ? 'items' : 'properties'
-          schemaObject[inputName][propertyName] = inputSchema
-        }
-
-        delete schemaObject[inputName].schema
       }
     }
 
