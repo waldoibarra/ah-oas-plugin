@@ -1,6 +1,8 @@
 'use strict'
 
+const fs = require('fs')
 const path = require('path')
+const { promisify } = require('util')
 
 const _ = require('lodash')
 const { api } = require('actionhero')
@@ -14,12 +16,8 @@ module.exports = class Oas {
     this._componentsObject = null
   }
 
-  getOpenApiDocument () {
-    return this._openApiDocument
-  }
-
   // https://swagger.io/specification/
-  buildOpenApiDocument () {
+  async buildOpenApiDocument () {
     // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#oasObject
     this._openApiDocument = {}
 
@@ -42,6 +40,8 @@ module.exports = class Oas {
 
     // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#componentsObject
     this._componentsObject && (this._openApiDocument.components = this._componentsObject)
+
+    this._writeOpenApiDocument()
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#infoObject
@@ -143,6 +143,10 @@ module.exports = class Oas {
         const route = routes[i]
         const actionByRoute = actions[route.action]
 
+        if (_.isArray(api.config.oas.ignoreRoutes) && api.config.oas.ignoreRoutes.includes(route.path)) {
+          continue
+        }
+
         for (let version in actionByRoute) {
           const action = actionByRoute[version]
           const v = verb.toLowerCase() === 'all' ? verbs : [verb]
@@ -183,7 +187,7 @@ module.exports = class Oas {
       tags.push(action.version.toString())
     }
 
-    if (_.isArray(action.tags) && action.tags.lenght > 0) {
+    if (_.isArray(action.tags) && action.tags.length > 0) {
       tags.push(...action.tags)
     }
 
@@ -221,7 +225,7 @@ module.exports = class Oas {
 
       if (verb === 'post' || verb === 'put' || verb === 'patch') {
         // Validate it is indeed a request body parameter.
-        const parameterIn = this._getParameterIn(input, action.in, route)
+        const parameterIn = this._getParameterIn(inputName, input, action.in, route)
 
         if (!parameterIn) {
           bodyParams.push(inputName)
@@ -245,8 +249,20 @@ module.exports = class Oas {
         description: 'OK.'
       }
     }
+    const responseSchemas = {
+      ...defaultSchemas,
+      ...(action.responseSchemas || {})
+    }
 
-    return action.responseSchemas || defaultSchemas
+    if (!responseSchemas['200'].content && _.isPlainObject(action.outputExample) && !_.isEmpty(action.outputExample)) {
+      responseSchemas['200'].content = {
+        'application/json': {
+          examples: action.outputExample
+        }
+      }
+    }
+
+    return responseSchemas
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#requestBodyObject
@@ -255,16 +271,32 @@ module.exports = class Oas {
     const componentName = `${action.name}_${action.version}`
     let referenceObject = this._getReferenceObject('requestBodies', componentName)
 
+    if (bodyParams.length === 0) {
+      return null
+    }
+
     if (referenceObject) {
       return referenceObject
     }
 
     requestBodyObject.content = this._getMediaTypeObjects(action, bodyParams)
-    // TODO: When to mark as required?
+    requestBodyObject.required = this._isBodyRequired(action.inputs, bodyParams)
 
     referenceObject = this._getReferenceObject('requestBodies', componentName, requestBodyObject)
 
     return referenceObject
+  }
+
+  _isBodyRequired (inputs, bodyParams) {
+    for (let i in bodyParams) {
+      const param = bodyParams[i]
+
+      if (inputs[param].required) {
+        return true
+      }
+    }
+
+    return false
   }
 
   _getMediaTypeObjects (action, bodyParams) {
@@ -284,16 +316,18 @@ module.exports = class Oas {
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#mediaTypeObject
   _getMediaTypeObject (action, bodyParams) {
     const mediaTypeObject = {}
-    const schemaObject = this._getSchemaObject(action.inputs, bodyParams)
+    const schemaObject = this._getSchemaObject(action.inputs, bodyParams, true)
+    const example = this._getExampleObject(schemaObject)
 
     schemaObject && (mediaTypeObject.schema = schemaObject)
+    example && (mediaTypeObject.example = example)
 
     return mediaTypeObject
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterObject
   _getParameterObjects (action, params, route) {
-    if (!action.inputs) {
+    if (!action.inputs || params.length === 0) {
       return null
     }
 
@@ -323,7 +357,7 @@ module.exports = class Oas {
     }
 
     parameterObject.name = name
-    parameterObject.in = this._getParameterIn(input, action.in, route) || 'query'
+    parameterObject.in = this._getParameterIn(name, input, action.in, route) || 'query'
     input.description && (parameterObject.description = input.description)
 
     if (typeof input.required !== 'undefined') {
@@ -337,7 +371,19 @@ module.exports = class Oas {
     if (input.schema) {
       const schemaObject = this._getSchemaObject(input.schema)
 
-      schemaObject && (parameterObject.schema = schemaObject)
+      if (schemaObject) {
+        parameterObject.schema = schemaObject
+
+        if (schemaObject.items) {
+          parameterObject.schema.type = 'array'
+        } else if (schemaObject.properties) {
+          parameterObject.schema.type = 'object'
+        } else {
+          parameterObject.schema.type = 'string'
+        }
+      }
+    } else {
+      parameterObject.schema = { type: input.type || 'array' }
     }
 
     input.style && (parameterObject.style = input.style)
@@ -350,16 +396,16 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameterIn
-  _getParameterIn (input, actionIn, route) {
-    // Possible values are "query", "header", "path" or "cookie".
+  _getParameterIn (inputName, input, actionIn, route) {
     const parameterIn = input.in || actionIn
+    const possibleValues = ['query', 'header', 'path', 'cookie']
 
-    if (parameterIn) {
+    if (possibleValues.includes(parameterIn)) {
       return parameterIn
     }
 
     // Validate if parameter is part of the route.
-    const found = route.match(/\/:([\w]*)/g)
+    const found = route.includes(`/:${inputName}`)
 
     if (found) {
       return 'path'
@@ -369,29 +415,111 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#schemaObject
-  _getSchemaObject (inputs, whiteListedParams) {
+  _getSchemaObject (inputs, whiteListedParams = null, isBodyParam = false, isRootProperty = true, parentIsObjectType = false) {
     if (!inputs || typeof inputs !== 'object') {
       return null
     }
 
-    const schemaObject = {}
+    let schemaObject = null
 
     for (let inputName in inputs) {
       const input = inputs[inputName]
 
-      if (_.isArray(whiteListedParams) && !whiteListedParams.includes(inputName)) {
+      if (typeof input !== 'object') {
+        return null
+      }
+
+      if (isRootProperty && _.isArray(whiteListedParams) && !whiteListedParams.includes(inputName)) {
         continue
       }
+
+      !schemaObject && (schemaObject = {})
 
       // Delete functions from input object.
       schemaObject[inputName] = JSON.parse(JSON.stringify(input))
 
-      if (!input.type) {
-        schemaObject[inputName].type = 'string'
+      delete schemaObject[inputName].formatter
+      delete schemaObject[inputName].default
+      delete schemaObject[inputName].validator
+
+      if (typeof schemaObject[inputName].schema === 'object' || typeof _.get(schemaObject[inputName], 'items.schema') === 'object') {
+        const schema = schemaObject[inputName].schema || _.get(schemaObject[inputName], 'items.schema')
+        const childSchemaObject = this._getSchemaObject(
+          schema,
+          whiteListedParams,
+          isBodyParam,
+          false,
+          typeof schemaObject[inputName].schema === 'object'
+        )
+        delete schemaObject[inputName].schema
+
+        if (schemaObject[inputName].type === 'array') {
+          schemaObject[inputName].items = childSchemaObject
+        } else {
+          schemaObject[inputName].type = 'object'
+          schemaObject[inputName].properties = childSchemaObject
+        }
       }
+
+      this._composeSchemaObject(schemaObject[inputName], isBodyParam)
     }
 
-    return schemaObject
+    if (isRootProperty || !parentIsObjectType) {
+      const required = []
+      const properties = {}
+
+      for (let inputName in schemaObject) {
+        if (typeof schemaObject[inputName].required === 'boolean') {
+          required.push(inputName)
+          delete schemaObject[inputName].required
+        }
+
+        properties[inputName] = schemaObject[inputName]
+      }
+
+      const formattedSchemaObject = { properties }
+
+      if (required.length > 0) {
+        formattedSchemaObject.required = required
+      }
+
+      return formattedSchemaObject
+    } else {
+      return schemaObject
+    }
+  }
+
+  _composeSchemaObject (input, isBodyParam) {
+    const type = input.type || 'string'
+
+    if (type === 'array' && !input.items) {
+      input.items = { type: 'string' }
+    }
+
+    if (isBodyParam) {
+      // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#request-body-examples
+      input.type = type
+    } else {
+      // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#parameter-object-examples
+      input.schema = { type }
+      delete input.type
+    }
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#exampleObject
+  _getExampleObject (schemaObject) {
+    if (!schemaObject) {
+      return null
+    }
+
+    // TODO: Add example object construction logic.
+
+    // const exampleObject = { foo: {} }
+
+    // exampleObject.foo.summary = 'A foo example'
+    // exampleObject.bar.value = { foo: 'bar' }
+
+    return null
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#referenceObject
@@ -486,5 +614,37 @@ module.exports = class Oas {
     externalDocumentationObject && (tagObject.externalDocs = externalDocumentationObject)
 
     return tagObject
+  }
+
+  async _writeOpenApiDocument () {
+    if (!api.config.general.paths['public'] || api.config.general.paths['public'].length === 0) {
+      return
+    }
+
+    if (api.config.oas.openApiDocumentPath && api.config.oas.openApiDocumentName) {
+      const openApiDocumentPath = path.join(
+        api.config.general.paths['public'][0],
+        api.config.oas.openApiDocumentPath
+      )
+      const openApiDocumentFullPath = path.join(
+        openApiDocumentPath,
+        api.config.oas.openApiDocumentName + '.json'
+      )
+
+      try {
+        try {
+          await promisify(fs.stat)(openApiDocumentPath)
+        } catch (ex) {
+          await promisify(fs.mkdir)(openApiDocumentPath)
+        }
+
+        const data = JSON.stringify(this._openApiDocument, null, 2)
+
+        await promisify(fs.writeFile)(openApiDocumentFullPath, data, { encoding: 'utf-8' })
+      } catch (ex) {
+        api.log('Cannot write OpenAPI Specification document', 'warning')
+        api.log(ex, 'warning')
+      }
+    }
   }
 }
