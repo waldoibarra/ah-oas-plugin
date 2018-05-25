@@ -4,7 +4,7 @@
 
 Generate OpenApi Specification documentation for ActionHero
 
-![screenshot](https://raw.github.com/walbertoibarra/ah-oas-plugin/master/docs/screenshots/openapi.png)
+![screenshot](https://raw.githubusercontent.com/walbertoibarra/ah-oas-plugin/develop/docs/screenshots/openapi.png)
 
 ## Install and setup
 
