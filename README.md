@@ -8,6 +8,22 @@ Generate OpenApi Specification documentation for ActionHero
 $ npm install ah-oas-plugin --save
 ~~~
 
+Make sure you add the plugin to `config/plugins.js`:
+
+~~~ js
+'use strict'
+
+const path = require('path')
+
+exports['default'] = {
+  plugins: (api) => {
+    return {
+      'ah-oas-plugin': { path: path.join(__dirname, '../../node_modules/ah-oas-plugin') }
+    }
+  }
+}
+~~~
+
 ## Overview
 
 You can now access your project documentation on: [http://127.0.0.1:8080/public/oas](http://127.0.0.1:8080/public/oas)
@@ -18,7 +34,7 @@ You can now access your project documentation on: [http://127.0.0.1:8080/public/
 
 ## Configuration
 
-Edit values on `api.config.oas`:
+Edit values on `config/oas.js`:
 
 ~~~ js
 'use strict'
