@@ -1,8 +1,12 @@
 # ah-oas-plugin
 
+[![npm version](https://badge.fury.io/js/ah-oas-plugin.svg)](https://badge.fury.io/js/ah-oas-plugin)
+
 Generate OpenApi Specification documentation for ActionHero
 
-## Install
+![screenshot](https://raw.github.com/walbertoibarra/ah-oas-plugin/master/docs/screenshots/openapi.png)
+
+## Install and setup
 
 ~~~ sh
 $ npm install ah-oas-plugin --save
@@ -24,13 +28,75 @@ exports['default'] = {
 }
 ~~~
 
-## Overview
-
 You can now access your project documentation on: [http://127.0.0.1:8080/public/oas](http://127.0.0.1:8080/public/oas)
 
-### TODOs
+## Usage
 
-- Fix path parameters
+This plugin will analyse your project's actions, generate a OpenApi Specification file
+on your public folder and display it with Swagger UI.
+
+Here's an action example:
+
+~~~ js
+'use strict'
+
+const { Action, api } = require('actionhero')
+
+module.exports = class Status extends Action {
+  constructor () {
+    super()
+
+    this.name = 'status'
+    this.description = 'I will return some basic information about the API'
+
+    this.middleware = [
+      'validateJwtMiddleware'
+    ]
+
+    this.headers = {
+      'Accept-Language': {
+        description: 'Which languages the client is able to understand, and which locale variant is preferred.',
+        required: false,
+        schema: {
+          type: 'string'
+        },
+        example: 'en-US'
+      }
+    }
+
+    this.responseSchemas = {
+      '200': {
+        description: 'OK.',
+        schema: {
+          type: 'object'
+        }
+      }
+    }
+
+    this.inputs = {
+      email: {
+        description: 'User type.',
+        required: true,
+        type: 'string',
+        example: 'user@example.com'
+      },
+      age: {
+        description: 'User age.',
+        required: true,
+        type: 'integer',
+        example: 30
+      }
+    }
+
+    this.tags = ['Core']
+  }
+
+  async run (data) {
+    // ...
+  }
+}
+
+~~~
 
 ## Configuration
 
@@ -92,3 +158,7 @@ exports.default = {
   }
 }
 ~~~
+
+## TODO
+
+- Fix path parameters
