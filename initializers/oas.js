@@ -16,5 +16,6 @@ module.exports = class OasInitializer extends Initializer {
 
   async start () {
     await api.oas.buildOpenApiDocument()
+    await api.oas.writeOpenApiDocument()
   }
 }

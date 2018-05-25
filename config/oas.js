@@ -17,8 +17,6 @@ exports.default = {
       ignoreRoutes: [],
       // Set true if you want to organize actions by version
       groupByVersionTag: false,
-      // For simple routes, groups all actions under a single category
-      groupBySimpleActionTag: true,
       // In some cases where actionhero network topology needs to point elsewhere.
       // If null, uses api.config.oas.baseUrl
       hostOverride: null,

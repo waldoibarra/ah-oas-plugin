@@ -40,8 +40,48 @@ module.exports = class Oas {
 
     // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#componentsObject
     this._componentsObject && (this._openApiDocument.components = this._componentsObject)
+  }
 
-    this._writeOpenApiDocument()
+  async writeOpenApiDocument () {
+    if (!api.config.general.paths['public'] || api.config.general.paths['public'].length === 0) {
+      api.log('No public directory found to write OpenAPI Specification document', 'warning')
+
+      return
+    }
+
+    if (_.isEmpty(this._openApiDocument)) {
+      api.log('OpenAPI Specification document is empty', 'warning')
+
+      return
+    }
+
+    if (api.config.oas.openApiDocumentPath && api.config.oas.openApiDocumentName) {
+      const openApiDocumentPath = path.join(
+        api.config.general.paths['public'][0],
+        api.config.oas.openApiDocumentPath
+      )
+      const openApiDocumentFullPath = path.join(
+        openApiDocumentPath,
+        api.config.oas.openApiDocumentName + '.json'
+      )
+
+      try {
+        try {
+          await promisify(fs.stat)(openApiDocumentPath)
+        } catch (ex) {
+          await promisify(fs.mkdir)(openApiDocumentPath)
+        }
+
+        const data = JSON.stringify(this._openApiDocument, null, 2)
+
+        await promisify(fs.writeFile)(openApiDocumentFullPath, data, { encoding: 'utf-8' })
+      } catch (ex) {
+        api.log('Cannot write OpenAPI Specification document', 'warning')
+        api.log(ex, 'warning')
+      }
+    } else {
+      api.log('No path or name defined to write OpenAPI Specification document', 'warning')
+    }
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#infoObject
@@ -200,10 +240,20 @@ module.exports = class Oas {
     const { bodyParams, params } = this._divideParameters(action, verb, route)
     const requestBodyObject = this._getRequestBodyObject(action, bodyParams)
     const parameterObjects = this._getParameterObjects(action, params, route)
+    const headerParameterObjects = this._getHeaderParameterObjects(action)
 
     requestBodyObject && (operationObject.requestBody = requestBodyObject)
-    parameterObjects && (operationObject.parameters = parameterObjects)
+    parameterObjects && (operationObject.parameters = parameterObjects.slice(0))
     operationObject.responses = this._getResponsesObject(action)
+
+    // Merge header parameters.
+    if (headerParameterObjects) {
+      if (operationObject.parameters) {
+        operationObject.parameters.push(...headerParameterObjects)
+      } else {
+        operationObject.parameters = headerParameterObjects.slice(0)
+      }
+    }
 
     if (typeof action.deprecated !== 'undefined') {
       operationObject.deprecated = action.deprecated
@@ -317,10 +367,8 @@ module.exports = class Oas {
   _getMediaTypeObject (action, bodyParams) {
     const mediaTypeObject = {}
     const schemaObject = this._getSchemaObject(action.inputs, bodyParams, true)
-    const example = this._getExampleObject(schemaObject)
 
     schemaObject && (mediaTypeObject.schema = schemaObject)
-    example && (mediaTypeObject.example = example)
 
     return mediaTypeObject
   }
@@ -506,20 +554,46 @@ module.exports = class Oas {
     }
   }
 
-  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#exampleObject
-  _getExampleObject (schemaObject) {
-    if (!schemaObject) {
+  _getHeaderParameterObjects (action) {
+    if (!action.headers) {
       return null
     }
 
-    // TODO: Add example object construction logic.
+    const headerParameterObjects = []
 
-    // const exampleObject = { foo: {} }
+    for (let name in action.headers) {
+      const header = action.headers[name]
+      const headerObject = this._getHeaderObject(header)
+      const headerParameter = {
+        name: name,
+        in: 'header',
+        ...headerObject
+      }
 
-    // exampleObject.foo.summary = 'A foo example'
-    // exampleObject.bar.value = { foo: 'bar' }
+      headerParameterObjects.push(headerParameter)
+    }
 
-    return null
+    return headerParameterObjects
+  }
+
+  // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#headerObject
+  _getHeaderObject (header) {
+    const headerObject = {}
+
+    header.description && (headerObject.description = header.description)
+    header.schema && (headerObject.schema = header.schema)
+    header.explode && (headerObject.explode = header.explode)
+    header.style && (headerObject.style = header.style)
+    !headerObject.style && (headerObject.style = 'simple')
+    header.example && (headerObject.example = header.example)
+
+    if (typeof header.required !== 'undefined') {
+      headerObject.required = header.required
+    } else {
+      headerObject.required = false
+    }
+
+    return headerObject
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#referenceObject
@@ -614,37 +688,5 @@ module.exports = class Oas {
     externalDocumentationObject && (tagObject.externalDocs = externalDocumentationObject)
 
     return tagObject
-  }
-
-  async _writeOpenApiDocument () {
-    if (!api.config.general.paths['public'] || api.config.general.paths['public'].length === 0) {
-      return
-    }
-
-    if (api.config.oas.openApiDocumentPath && api.config.oas.openApiDocumentName) {
-      const openApiDocumentPath = path.join(
-        api.config.general.paths['public'][0],
-        api.config.oas.openApiDocumentPath
-      )
-      const openApiDocumentFullPath = path.join(
-        openApiDocumentPath,
-        api.config.oas.openApiDocumentName + '.json'
-      )
-
-      try {
-        try {
-          await promisify(fs.stat)(openApiDocumentPath)
-        } catch (ex) {
-          await promisify(fs.mkdir)(openApiDocumentPath)
-        }
-
-        const data = JSON.stringify(this._openApiDocument, null, 2)
-
-        await promisify(fs.writeFile)(openApiDocumentFullPath, data, { encoding: 'utf-8' })
-      } catch (ex) {
-        api.log('Cannot write OpenAPI Specification document', 'warning')
-        api.log(ex, 'warning')
-      }
-    }
   }
 }
