@@ -398,7 +398,7 @@ module.exports = class Oas {
   _getParameterObject (action, input, name, route) {
     const parameterObject = {}
     const componentName = `${action.name}_${action.version}_${name}`
-    let referenceObject = this._getReferenceObject('parameter', componentName)
+    let referenceObject = this._getReferenceObject('parameters', componentName)
 
     if (referenceObject) {
       return referenceObject
@@ -431,14 +431,14 @@ module.exports = class Oas {
         }
       }
     } else {
-      parameterObject.schema = { type: input.type || 'array' }
+      parameterObject.schema = { type: input.type || 'string' }
     }
 
     input.style && (parameterObject.style = input.style)
 
     // TODO: Add example objects.
 
-    referenceObject = this._getReferenceObject('parameter', componentName, parameterObject)
+    referenceObject = this._getReferenceObject('parameters', componentName, parameterObject)
 
     return referenceObject
   }

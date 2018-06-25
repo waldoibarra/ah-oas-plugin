@@ -158,7 +158,3 @@ exports.default = {
   }
 }
 ~~~
-
-## TODO
-
-- Fix path parameters
