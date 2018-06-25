@@ -518,7 +518,10 @@ module.exports = class Oas {
 
       for (let inputName in schemaObject) {
         if (typeof schemaObject[inputName].required === 'boolean') {
-          required.push(inputName)
+          if (schemaObject[inputName].required) {
+            required.push(inputName)
+          }
+
           delete schemaObject[inputName].required
         }
 
