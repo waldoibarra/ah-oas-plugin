@@ -563,8 +563,13 @@ module.exports = class Oas {
     }
 
     const headerParameterObjects = []
+    const blacklistedHeaderParams = ['Accept', 'Content-Type', 'Authorization']
 
     for (let name in action.headers) {
+      if (blacklistedHeaderParams.includes(name)) {
+        continue
+      }
+
       const header = action.headers[name]
       const headerObject = this._getHeaderObject(header)
       const headerParameter = {
@@ -576,7 +581,7 @@ module.exports = class Oas {
       headerParameterObjects.push(headerParameter)
     }
 
-    return headerParameterObjects
+    return headerParameterObjects.length ? headerParameterObjects : null
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#headerObject
