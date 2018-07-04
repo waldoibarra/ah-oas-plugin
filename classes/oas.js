@@ -29,7 +29,7 @@ module.exports = class Oas {
     const serverObjects = this._getServerObjects()
     serverObjects && (this._openApiDocument.servers = serverObjects)
 
-    this._openApiDocument.security = this._getSecurityRequirementObjects()
+    this._setSecurityRequirementObjects()
     this._openApiDocument.paths = this._getPathsObject()
 
     const tagObjects = this._getTagObjects()
@@ -259,9 +259,7 @@ module.exports = class Oas {
       operationObject.deprecated = action.deprecated
     }
 
-    // FIXME: Remove this from here, read this from the action itself.
-    // Consider using _getSecurityRequirementObjects and send it the action?
-    operationObject.security = this._openApiDocument.security
+    action.security && (operationObject.security = action.security)
 
     return operationObject
   }
@@ -351,7 +349,7 @@ module.exports = class Oas {
 
   _getMediaTypeObjects (action, bodyParams) {
     const mediaTypeObjects = {}
-    const mediaTypes = ['application/json'] // TODO: Read from somewhere else?
+    const mediaTypes = ['application/json']
     const mediaTypeObject = this._getMediaTypeObject(action, bodyParams)
 
     for (let i in mediaTypes) {
@@ -435,8 +433,6 @@ module.exports = class Oas {
     }
 
     input.style && (parameterObject.style = input.style)
-
-    // TODO: Add example objects.
 
     referenceObject = this._getReferenceObject('parameters', componentName, parameterObject)
 
@@ -623,24 +619,16 @@ module.exports = class Oas {
   }
 
   // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#securityRequirementObject
-  _getSecurityRequirementObjects () {
-    const securityRequirementObjects = api.config.oas.security
-    const hasInvalidSecurityRequirementsFromConfigFile = true // TODO: Add validations for this.
-
-    if (hasInvalidSecurityRequirementsFromConfigFile) {
+  _setSecurityRequirementObjects () {
+    // TODO: Add validations to check if it's a valid security object.
+    if (api.config.oas.security) {
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#security-scheme-object
-      return [{
-        type: 'apiKey',
-        name: 'Authorization',
-        'in': 'header'
-      }, {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT'
-      }]
-    }
+      for (let k in api.config.oas.security) {
+        const securityRequirementObject = api.config.oas.security[k]
 
-    return securityRequirementObjects
+        _.set(this._componentsObject, `securitySchemes.${k}`, securityRequirementObject)
+      }
+    }
   }
 
   _getTagObjects () {
