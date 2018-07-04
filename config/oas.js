@@ -26,25 +26,11 @@ exports.default = {
       // Extended documentation for the whole API.
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#externalDocumentationObject
       // Set to null if not needed.
-      apiDocumentation: {
-        description: 'Find more info about the API here',
-        url: 'https://docs.actionherojs.com'
-      },
+      apiDocumentation: null,
       // Information about tags, you can add info about any version tag (including version tags).
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#tagObject
       // Set to null if not needed.
-      tagsInfo: {
-        '1': {
-          description: 'Version 1 of the API',
-          externalDocs: {
-            description: 'Find more info here',
-            url: 'https://docs.actionherojs.com/'
-          }
-        },
-        'Core': {
-          description: 'Core actions'
-        }
-      },
+      tagsInfo: null,
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#serverObject
       servers: null,
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#securityRequirementObject

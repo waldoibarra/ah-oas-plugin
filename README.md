@@ -22,7 +22,7 @@ const path = require('path')
 exports['default'] = {
   plugins: (api) => {
     return {
-      'ah-oas-plugin': { path: path.join(__dirname, '../../node_modules/ah-oas-plugin') }
+      'ah-oas-plugin': { path: path.join(__dirname, '../node_modules/ah-oas-plugin') }
     }
   }
 }
@@ -89,6 +89,12 @@ module.exports = class Status extends Action {
     }
 
     this.tags = ['Core']
+
+    this.security = [
+      {
+        'api_key': []
+      }
+    ]
   }
 
   async run (data) {
@@ -153,12 +159,26 @@ exports.default = {
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#serverObject
       servers: null,
       // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/3.0.1.md#securityRequirementObject
-      security: null
+      security: {
+        'api_key': {
+          type: 'apiKey',
+          name: 'Authorization',
+          'in': 'header'
+        },
+        'petstore_auth': {
+          'type': 'oauth2',
+          'flows': {
+            'implicit': {
+              'authorizationUrl': 'http://example.org/api/oauth/dialog',
+              'scopes': {
+                'write:pets': 'modify pets in your account',
+                'read:pets': 'read your pets'
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
 ~~~
-
-## TODO
-
-- Fix path parameters
