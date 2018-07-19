@@ -192,7 +192,13 @@ module.exports = class Oas {
           const v = verb.toLowerCase() === 'all' ? verbs : [verb]
           const pathItemObject = this._getPathItemObject(route.path, action, v)
 
-          pathsObject = { ...pathsObject, ...pathItemObject }
+          Object.keys(pathItemObject).forEach((key) => {
+            if (pathsObject[key]) {
+              pathsObject[key] = { ...pathsObject[key], ...pathItemObject[key] }
+            } else {
+              pathsObject = { ...pathsObject, ...pathItemObject }
+            }
+          })
         }
       }
     }
@@ -210,9 +216,9 @@ module.exports = class Oas {
       const verb = verbs[i]
       const operationObject = this._getOperationObject(action, verb, route)
 
-      action.summary && (pathItemObject[route].summary = action.summary)
-      action.description && (pathItemObject[route].description = action.description)
       pathItemObject[route][verb] = operationObject
+      action.summary && (pathItemObject[route][verb].summary = action.summary)
+      action.description && (pathItemObject[route][verb].description = action.description)
     }
 
     return pathItemObject
@@ -235,7 +241,7 @@ module.exports = class Oas {
       operationObject.tags = tags
     }
 
-    operationObject.operationId = action.name + '_' + action.version.toString()
+    operationObject.operationId = verb  + '_' + action.name + '_' + action.version.toString()
 
     const { bodyParams, params } = this._divideParameters(action, verb, route)
     const requestBodyObject = this._getRequestBodyObject(action, bodyParams)
