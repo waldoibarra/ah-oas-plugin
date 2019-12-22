@@ -2,7 +2,7 @@
   "author": "Walberto Ibarra <walberto.ibarra92@gmail.com>",
   "name": "ah-oas-plugin",
   "description": "Generate OpenApi Specification documentation for ActionHero",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
   },
