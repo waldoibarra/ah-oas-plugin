@@ -5,10 +5,11 @@ const path = require('path')
 const { promisify } = require('util')
 
 const _ = require('lodash')
-const { api } = require('actionhero')
+const { api, projectRoot } = require('actionhero')
 const parseAuthor = require('parse-author')
 
-const packageJson = require(api.projectRoot + path.sep + 'package.json')
+const v21CompatibleProjectRoot = api.projectRoot || projectRoot
+const packageJson = require(v21CompatibleProjectRoot + path.sep + 'package.json')
 
 module.exports = class Oas {
   constructor () {
